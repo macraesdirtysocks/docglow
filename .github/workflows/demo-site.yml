@@ -1,60 +1,48 @@
-name: Deploy Demo Site
+name: Deploy Docglow to GitHub Pages
 
 on:
   push:
-    branches: [main]
-    paths:
-      - 'examples/flowstate/**'
-      - 'src/docglow/**'
-      - 'frontend/**'
-      - '.github/workflows/demo-site.yml'
+    branches:
+      - main  
   workflow_dispatch:
 
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      deployments: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
         with:
-          node-version: '22'
+          enable-cache: true
+          python-version: '3.10' # Match your local Python version
 
-      - name: Build frontend
-        working-directory: frontend
-        run: npm ci && npm run build
-
-      - name: Copy frontend assets to static
+      - name: Install dependencies with uv sync
         run: |
-          rm -rf src/docglow/static/assets/*
-          cp frontend/dist/assets/* src/docglow/static/assets/
-          cp frontend/dist/index.html src/docglow/static/
+          uv sync --frozen
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install docglow
-        run: pip install .
-
-      - name: Prepare head scripts
-        # PostHog first so window.posthog exists before the CTA tries to use it.
-        # Both are demo-site only — they are never bundled into the docglow package.
+      - name: Generate Docglow site
         run: |
-          sed "s/POSTHOG_API_KEY/${{ secrets.POSTHOG_API_KEY }}/" examples/flowstate/posthog.html > /tmp/head.html
-          cat examples/flowstate/cloud-cta.html >> /tmp/head.html
+          uv run docglow generate --project-dir examples/jaffle-shop --output-dir ./public --static
 
-      - name: Generate demo site
-        run: docglow generate --project-dir examples/flowstate --output-dir demo-output --static --enable-erd --head-script /tmp/head.html
-
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
+      - name: Upload artifact for GitHub Pages
+        uses: actions/upload-pages-artifact@v3
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy demo-output --project-name=docglow-demo --commit-dirty=true
+          path: ./public
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
